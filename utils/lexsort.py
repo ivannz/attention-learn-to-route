@@ -26,14 +26,22 @@ def _torch_lexsort_cuda(keys, dim=-1):
     d = keys[0].size(dim)  # Sort dimension size
     numel = flat_keys[0].numel()
     batch_size = numel // d
-    batch_key = torch.arange(batch_size, dtype=torch.int64, device=keys[0].device)[:, None].repeat(1, d).view(-1)
+    batch_key = (
+        torch.arange(batch_size, dtype=torch.int64, device=keys[0].device)[:, None]
+        .repeat(1, d)
+        .view(-1)
+    )
 
     flat_keys = flat_keys + (batch_key,)
 
     # We rely on undocumented behavior that the sort is stable provided that
     if numel < MIN_NUMEL_STABLE_SORT:
         n_rep = (MIN_NUMEL_STABLE_SORT + numel - 1) // numel  # Ceil
-        rep_key = torch.arange(n_rep, dtype=torch.int64, device=keys[0].device)[:, None].repeat(1, numel).view(-1)
+        rep_key = (
+            torch.arange(n_rep, dtype=torch.int64, device=keys[0].device)[:, None]
+            .repeat(1, numel)
+            .view(-1)
+        )
         flat_keys = tuple(k.repeat(n_rep) for k in flat_keys) + (rep_key,)
 
     idx = None  # Identity sorting initially

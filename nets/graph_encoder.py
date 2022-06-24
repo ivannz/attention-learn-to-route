@@ -5,7 +5,6 @@ import math
 
 
 class SkipConnection(nn.Module):
-
     def __init__(self, module):
         super(SkipConnection, self).__init__()
         self.module = module
@@ -15,14 +14,7 @@ class SkipConnection(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(
-            self,
-            n_heads,
-            input_dim,
-            embed_dim,
-            val_dim=None,
-            key_dim=None
-    ):
+    def __init__(self, n_heads, input_dim, embed_dim, val_dim=None, key_dim=None):
         super(MultiHeadAttention, self).__init__()
 
         if val_dim is None:
@@ -49,7 +41,7 @@ class MultiHeadAttention(nn.Module):
     def init_parameters(self):
 
         for param in self.parameters():
-            stdv = 1. / math.sqrt(param.size(-1))
+            stdv = 1.0 / math.sqrt(param.size(-1))
             param.data.uniform_(-stdv, stdv)
 
     def forward(self, q, h=None, mask=None):
@@ -89,7 +81,9 @@ class MultiHeadAttention(nn.Module):
 
         # Optionally apply mask to prevent attention
         if mask is not None:
-            mask = mask.view(1, batch_size, n_query, graph_size).expand_as(compatibility)
+            mask = mask.view(1, batch_size, n_query, graph_size).expand_as(
+                compatibility
+            )
             compatibility[mask] = -np.inf
 
         attn = torch.softmax(compatibility, dim=-1)
@@ -103,8 +97,10 @@ class MultiHeadAttention(nn.Module):
         heads = torch.matmul(attn, V)
 
         out = torch.mm(
-            heads.permute(1, 2, 0, 3).contiguous().view(-1, self.n_heads * self.val_dim),
-            self.W_out.view(-1, self.embed_dim)
+            heads.permute(1, 2, 0, 3)
+            .contiguous()
+            .view(-1, self.n_heads * self.val_dim),
+            self.W_out.view(-1, self.embed_dim),
         ).view(batch_size, n_query, self.embed_dim)
 
         # Alternative:
@@ -120,14 +116,12 @@ class MultiHeadAttention(nn.Module):
 
 
 class Normalization(nn.Module):
-
-    def __init__(self, embed_dim, normalization='batch'):
+    def __init__(self, embed_dim, normalization="batch"):
         super(Normalization, self).__init__()
 
-        normalizer_class = {
-            'batch': nn.BatchNorm1d,
-            'instance': nn.InstanceNorm1d
-        }.get(normalization, None)
+        normalizer_class = {"batch": nn.BatchNorm1d, "instance": nn.InstanceNorm1d}.get(
+            normalization, None
+        )
 
         self.normalizer = normalizer_class(embed_dim, affine=True)
 
@@ -137,7 +131,7 @@ class Normalization(nn.Module):
     def init_parameters(self):
 
         for name, param in self.named_parameters():
-            stdv = 1. / math.sqrt(param.size(-1))
+            stdv = 1.0 / math.sqrt(param.size(-1))
             param.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
@@ -152,60 +146,67 @@ class Normalization(nn.Module):
 
 
 class MultiHeadAttentionLayer(nn.Sequential):
-
     def __init__(
-            self,
-            n_heads,
-            embed_dim,
-            feed_forward_hidden=512,
-            normalization='batch',
+        self,
+        n_heads,
+        embed_dim,
+        feed_forward_hidden=512,
+        normalization="batch",
     ):
         super(MultiHeadAttentionLayer, self).__init__(
             SkipConnection(
-                MultiHeadAttention(
-                    n_heads,
-                    input_dim=embed_dim,
-                    embed_dim=embed_dim
-                )
+                MultiHeadAttention(n_heads, input_dim=embed_dim, embed_dim=embed_dim)
             ),
             Normalization(embed_dim, normalization),
             SkipConnection(
                 nn.Sequential(
                     nn.Linear(embed_dim, feed_forward_hidden),
                     nn.ReLU(),
-                    nn.Linear(feed_forward_hidden, embed_dim)
-                ) if feed_forward_hidden > 0 else nn.Linear(embed_dim, embed_dim)
+                    nn.Linear(feed_forward_hidden, embed_dim),
+                )
+                if feed_forward_hidden > 0
+                else nn.Linear(embed_dim, embed_dim)
             ),
-            Normalization(embed_dim, normalization)
+            Normalization(embed_dim, normalization),
         )
 
 
 class GraphAttentionEncoder(nn.Module):
     def __init__(
-            self,
-            n_heads,
-            embed_dim,
-            n_layers,
-            node_dim=None,
-            normalization='batch',
-            feed_forward_hidden=512
+        self,
+        n_heads,
+        embed_dim,
+        n_layers,
+        node_dim=None,
+        normalization="batch",
+        feed_forward_hidden=512,
     ):
         super(GraphAttentionEncoder, self).__init__()
 
         # To map input to embedding space
-        self.init_embed = nn.Linear(node_dim, embed_dim) if node_dim is not None else None
+        self.init_embed = (
+            nn.Linear(node_dim, embed_dim) if node_dim is not None else None
+        )
 
-        self.layers = nn.Sequential(*(
-            MultiHeadAttentionLayer(n_heads, embed_dim, feed_forward_hidden, normalization)
-            for _ in range(n_layers)
-        ))
+        self.layers = nn.Sequential(
+            *(
+                MultiHeadAttentionLayer(
+                    n_heads, embed_dim, feed_forward_hidden, normalization
+                )
+                for _ in range(n_layers)
+            )
+        )
 
     def forward(self, x, mask=None):
 
         assert mask is None, "TODO mask not yet supported!"
 
         # Batch multiply to get initial embeddings of nodes
-        h = self.init_embed(x.view(-1, x.size(-1))).view(*x.size()[:2], -1) if self.init_embed is not None else x
+        h = (
+            self.init_embed(x.view(-1, x.size(-1))).view(*x.size()[:2], -1)
+            if self.init_embed is not None
+            else x
+        )
 
         h = self.layers(h)
 

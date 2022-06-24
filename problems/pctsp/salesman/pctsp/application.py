@@ -14,7 +14,8 @@ from pctsp.algo import ilocal_search as ils
 from pkg_resources import resource_filename
 import random
 
-INPUT_INSTANCE_FILE = resource_filename('pctsp', 'data/problem_20_100_100_1000.pctsp')
+INPUT_INSTANCE_FILE = resource_filename("pctsp", "data/problem_20_100_100_1000.pctsp")
+
 
 def solve_instance(filename, min_prize, runs=10, seed=1234):
     random.seed(seed)
@@ -25,18 +26,17 @@ def solve_instance(filename, min_prize, runs=10, seed=1234):
 
     return (s.route[1:], s.quality)
 
-def main():
-    """Main function, that solves the PCTSP.
 
-    """
+def main():
+    """Main function, that solves the PCTSP."""
     pctsp = Pctsp()
     pctsp.load(INPUT_INSTANCE_FILE, 386)
-    #pctsp.prize = np.array([0, 4, 8, 3])
-    #pctsp.penal = np.array([1000, 7, 11, 17])
-    #pctsp.cost = np.array([[0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1], [1, 1, 1, 0]])
+    # pctsp.prize = np.array([0, 4, 8, 3])
+    # pctsp.penal = np.array([1000, 7, 11, 17])
+    # pctsp.cost = np.array([[0, 1, 1, 1], [1, 0, 1, 1], [1, 1, 0, 1], [1, 1, 1, 0]])
     # print(pctsp.type)
 
-    size = int(len(pctsp.prize)*0.7)
+    size = int(len(pctsp.prize) * 0.7)
 
     s = solution.random(pctsp, size=size)
     print(s.route)
@@ -56,5 +56,6 @@ def main():
     print(s.quality)
     print(s.is_valid())
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

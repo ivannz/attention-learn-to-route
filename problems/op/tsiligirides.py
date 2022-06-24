@@ -10,9 +10,14 @@ def op_tsiligirides(batch, sample=False, power=4.0):
         # Compute scores
         mask = state.get_mask()
         p = (
-                (mask[..., 1:] == 0).float() *
-                state.prize[state.ids, 1:] /
-                ((state.coords[state.ids, 1:, :] - state.cur_coord[:, :, None, :]).norm(p=2, dim=-1) + 1e-6)
+            (mask[..., 1:] == 0).float()
+            * state.prize[state.ids, 1:]
+            / (
+                (state.coords[state.ids, 1:, :] - state.cur_coord[:, :, None, :]).norm(
+                    p=2, dim=-1
+                )
+                + 1e-6
+            )
         ) ** power
         bestp, besta = p.topk(4, dim=-1)
         bestmask = mask[..., 1:].gather(-1, besta)
@@ -33,10 +38,11 @@ def op_tsiligirides(batch, sample=False, power=4.0):
             a = pnorm[:, 0, :].max(-1)[1].unsqueeze(-1)  # Add 'sampling dimension'
 
         # a == 0 means depot, otherwise subtract one
-        final_a = torch.cat((torch.zeros_like(besta[..., 0:1]), besta + 1), -1)[:, 0, :].gather(-1, a)
+        final_a = torch.cat((torch.zeros_like(besta[..., 0:1]), besta + 1), -1)[
+            :, 0, :
+        ].gather(-1, a)
 
         selected = final_a[..., 0]  # Squeeze unnecessary sampling dimension
         state = state.update(selected)
         all_a.append(selected)
     return torch.stack(all_a, -1)
-

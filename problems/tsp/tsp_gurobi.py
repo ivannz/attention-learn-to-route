@@ -17,10 +17,10 @@ from gurobipy import *
 
 def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
     """
-    Solves the Euclidan TSP problem to optimality using the MIP formulation 
+    Solves the Euclidan TSP problem to optimality using the MIP formulation
     with lazy subtour elimination constraint generation.
-    :param points: list of (x, y) coordinate 
-    :return: 
+    :param points: list of (x, y) coordinate
+    :return:
     """
 
     n = len(points)
@@ -31,14 +31,19 @@ def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
         if where == GRB.Callback.MIPSOL:
             # make a list of edges selected in the solution
             vals = model.cbGetSolution(model._vars)
-            selected = tuplelist((i, j) for i, j in model._vars.keys() if vals[i, j] > 0.5)
+            selected = tuplelist(
+                (i, j) for i, j in model._vars.keys() if vals[i, j] > 0.5
+            )
             # find the shortest cycle in the selected edge list
             tour = subtour(selected)
             if len(tour) < n:
                 # add subtour elimination constraint for every pair of cities in tour
-                model.cbLazy(quicksum(model._vars[i, j]
-                                      for i, j in itertools.combinations(tour, 2))
-                             <= len(tour) - 1)
+                model.cbLazy(
+                    quicksum(
+                        model._vars[i, j] for i, j in itertools.combinations(tour, 2)
+                    )
+                    <= len(tour) - 1
+                )
 
     # Given a tuplelist of edges, find the shortest subtour
 
@@ -52,25 +57,27 @@ def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
                 current = neighbors[0]
                 thiscycle.append(current)
                 unvisited.remove(current)
-                neighbors = [j for i, j in edges.select(current, '*') if j in unvisited]
+                neighbors = [j for i, j in edges.select(current, "*") if j in unvisited]
             if len(cycle) > len(thiscycle):
                 cycle = thiscycle
         return cycle
 
     # Dictionary of Euclidean distance between each pair of points
 
-    dist = {(i,j) :
-        math.sqrt(sum((points[i][k]-points[j][k])**2 for k in range(2)))
-        for i in range(n) for j in range(i)}
+    dist = {
+        (i, j): math.sqrt(sum((points[i][k] - points[j][k]) ** 2 for k in range(2)))
+        for i in range(n)
+        for j in range(i)
+    }
 
     m = Model()
     m.Params.outputFlag = False
 
     # Create variables
 
-    vars = m.addVars(dist.keys(), obj=dist, vtype=GRB.BINARY, name='e')
-    for i,j in vars.keys():
-        vars[j,i] = vars[i,j] # edge in opposite direction
+    vars = m.addVars(dist.keys(), obj=dist, vtype=GRB.BINARY, name="e")
+    for i, j in vars.keys():
+        vars[j, i] = vars[i, j]  # edge in opposite direction
 
     # You could use Python looping constructs and m.addVar() to create
     # these decision variables instead.  The following would be equivalent
@@ -81,16 +88,14 @@ def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
     #   vars[i,j] = m.addVar(obj=dist[i,j], vtype=GRB.BINARY,
     #                        name='e[%d,%d]'%(i,j))
 
-
     # Add degree-2 constraint
 
-    m.addConstrs(vars.sum(i,'*') == 2 for i in range(n))
+    m.addConstrs(vars.sum(i, "*") == 2 for i in range(n))
 
     # Using Python looping constructs, the preceding would be...
     #
     # for i in range(n):
     #   m.addConstr(sum(vars[i,j] for j in range(n)) == 2)
-
 
     # Optimize model
 
@@ -103,8 +108,8 @@ def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
         m.Params.mipGap = gap * 0.01  # Percentage
     m.optimize(subtourelim)
 
-    vals = m.getAttr('x', vars)
-    selected = tuplelist((i,j) for i,j in vals.keys() if vals[i,j] > 0.5)
+    vals = m.getAttr("x", vars)
+    selected = tuplelist((i, j) for i, j in vals.keys() if vals[i, j] > 0.5)
 
     tour = subtour(selected)
     assert len(tour) == n
@@ -115,7 +120,7 @@ def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
 def solve_all_gurobi(dataset):
     results = []
     for i, instance in enumerate(dataset):
-        print ("Solving instance {}".format(i))
+        print("Solving instance {}".format(i))
         result = solve_euclidian_tsp(instance)
         results.append(result)
     return results
