@@ -2,6 +2,7 @@ import time
 import torch
 from typing import NamedTuple
 from utils.lexsort import torch_lexsort
+from utils.topk import topk_indices as segment_topk_idx
 
 
 def beam_search(*args, **kwargs):
@@ -153,6 +154,7 @@ class BatchBeam(NamedTuple):
 
 
 def segment_topk_idx(x, k, ids):
+    raise NotImplementedError("Relies on undocumented stability of `torch.sort`")
     """
     Finds the topk per segment of data x given segment ids (0, 0, 0, 1, 1, 2, ...).
     Note that there may be fewer than k elements in a segment so the returned length index can vary.
