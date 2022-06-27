@@ -17,6 +17,7 @@ from reinforce_baselines import (
     WarmupBaseline,
 )
 from nets.attention_model import AttentionModel
+from nets.featureless_attention_model import FeaturelessAttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
 
@@ -66,9 +67,11 @@ def run(opts):
         load_data = torch_load_cpu(load_path)
 
     # Initialize model
-    model_class = {"attention": AttentionModel, "pointer": PointerNetwork}.get(
-        opts.model, None
-    )
+    model_class = {
+        "attention": AttentionModel,
+        "pointer": PointerNetwork,
+        "featureless": FeaturelessAttentionModel,
+    }.get(opts.model, None)
     assert model_class is not None, "Unknown model: {}".format(model_class)
     model = model_class(
         opts.embedding_dim,
@@ -170,7 +173,8 @@ def run(opts):
         if opts.use_cuda:
             torch.cuda.set_rng_state_all(load_data["cuda_rng_state"])
         # Set the random states
-        # Dumping of state was done before epoch callback, so do that now (model is loaded)
+        # Dumping of state was done before epoch callback, so do that now (model
+        #  is loaded)
         baseline.epoch_callback(model, epoch_resume)
         print("Resuming after {}".format(epoch_resume))
         opts.epoch_start = epoch_resume + 1
