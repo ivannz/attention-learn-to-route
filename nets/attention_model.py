@@ -246,7 +246,7 @@ class AttentionModel(nn.Module):
             return {
                 "nodes": (
                     self.node_type_embedding(input["kinds"])
-                    + self.init_embed(input["demand"])
+                    + self.init_embed(input["demand"].unsqueeze(-1))
                 ),
                 "edges": input["distances"],
             }
