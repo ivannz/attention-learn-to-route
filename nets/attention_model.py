@@ -80,26 +80,26 @@ class AttentionModel(nn.Module):
         self.shrink_size = shrink_size
 
         # Problem specific context parameters (placeholder and step context dimension)
-        if self.is_abscvrp:
-            pass
-
-        elif self.is_vrp or self.is_orienteering or self.is_pctsp:
+        if self.is_abscvrp or self.is_vrp or self.is_orienteering or self.is_pctsp:
             # Embedding of last node + remaining_capacity, remaining length, or
             #  remaining prize to collect
             step_context_dim = embedding_dim + 1
 
             if self.is_pctsp:
                 node_dim = 4  # x, y, expected_prize, penalty
-            else:
+            elif not self.is_abscvrp:
                 node_dim = 3  # x, y, demand / prize
+
+            else:
+                node_dim = 1  # demand / prize
 
             # Special embedding projection for depot node
             self.init_embed_depot = nn.Linear(2, embedding_dim)
 
-            if (
-                self.is_vrp and self.allow_partial
-            ):  # Need to include the demand if split delivery allowed
+            # Need to include the demand if split delivery allowed
+            if self.is_vrp and self.allow_partial:
                 self.project_node_step = nn.Linear(1, 3 * embedding_dim, bias=False)
+
         else:  # TSP
             assert problem.NAME == "tsp", "Unsupported problem: {}".format(problem.NAME)
             step_context_dim = 2 * embedding_dim  # Embedding of first and last node
@@ -112,7 +112,9 @@ class AttentionModel(nn.Module):
             )  # Placeholder should be in range of activations
 
         if self.is_abscvrp:
-            pass
+            # we've got two types of nodes: depots and clients
+            self.node_type_embedding = nn.Embedding(2, embedding_dim)
+            self.init_embed = nn.Linear(node_dim, embedding_dim, bias=False)
 
         else:
             self.init_embed = nn.Linear(node_dim, embedding_dim)
@@ -241,7 +243,13 @@ class AttentionModel(nn.Module):
     def _init_embed(self, input):
 
         if self.is_abscvrp:
-            raise NotImplementedError
+            return {
+                "nodes": (
+                    self.node_type_embedding(input["kinds"])
+                    + self.init_embed(input["demand"])
+                ),
+                "edges": input["distances"],
+            }
 
         elif self.is_vrp or self.is_orienteering or self.is_pctsp:
             if self.is_vrp:
