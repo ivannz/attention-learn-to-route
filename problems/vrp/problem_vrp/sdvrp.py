@@ -1,6 +1,6 @@
 import torch
 
-from problems.vrp.state_sdvrp import StateSDVRP
+from problems.vrp.state.sdvrp import StateSDVRP
 from utils.beam_search import beam_search
 
 
@@ -14,8 +14,8 @@ class SDVRP(object):
     def get_costs(dataset, pi):
         batch_size, graph_size = dataset["demand"].size()
 
-        # Each node can be visited multiple times, but we always deliver as much demand as possible
-        # We check that at the end all demand has been satisfied
+        # Each node can be visited multiple times, but we always deliver as much
+        #  demand as possible. We check that at the end all demand has been satisfied
         demands = torch.cat(
             (
                 torch.full_like(dataset["demand"][:, :1], -SDVRP.VEHICLE_CAPACITY),
@@ -43,7 +43,8 @@ class SDVRP(object):
             1, pi[..., None].expand(*pi.size(), loc_with_depot.size(-1))
         )
 
-        # Length is distance (L2-norm of difference) of each next location to its prev and of first and last to depot
+        # Length is distance (L2-norm of difference) of each next location to its prev
+        #  and of first and last to depot
         return (
             (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2).sum(1)
             + (d[:, 0] - dataset["depot"]).norm(p=2, dim=1)  # Depot to first

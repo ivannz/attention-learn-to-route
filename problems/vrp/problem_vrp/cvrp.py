@@ -1,6 +1,6 @@
 import torch
 
-from problems.vrp.state_cvrp import StateCVRP
+from problems.vrp.state.cvrp import StateCVRP
 from utils.beam_search import beam_search
 
 
@@ -24,7 +24,8 @@ class CVRP(object):
             == sorted_pi[:, -graph_size:]
         ).all() and (sorted_pi[:, :-graph_size] == 0).all(), "Invalid tour"
 
-        # Visiting depot resets capacity so we add demand = -capacity (we make sure it does not become negative)
+        # Visiting depot resets capacity so we add demand = -capacity (we make sure
+        #  it does not become negative)
         demand_with_depot = torch.cat(
             (
                 torch.full_like(dataset["demand"][:, :1], -CVRP.VEHICLE_CAPACITY),
@@ -51,7 +52,8 @@ class CVRP(object):
             1, pi[..., None].expand(*pi.size(), loc_with_depot.size(-1))
         )
 
-        # Length is distance (L2-norm of difference) of each next location to its prev and of first and last to depot
+        # Length is distance (L2-norm of difference) of each next location to its
+        #  prev and of first and last to depot
         return (
             (d[:, 1:] - d[:, :-1]).norm(p=2, dim=2).sum(1)
             + (d[:, 0] - dataset["depot"]).norm(p=2, dim=1)  # Depot to first

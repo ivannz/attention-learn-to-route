@@ -7,8 +7,9 @@ class StateSDVRP(NamedTuple):
     coords: torch.Tensor
     demand: torch.Tensor
 
-    # If this state contains multiple copies (i.e. beam search) for the same instance, then for memory efficiency
-    # the coords and demands tensors are not kept multiple times, so we need to use the ids to index the correct rows.
+    # If this state contains multiple copies (i.e. beam search) for the same instance,
+    #  then for memory efficiency the coords and demands tensors are not kept multiple
+    #  times, so we need to use the ids to index the correct rows.
     ids: torch.Tensor  # Keeps track of original fixed data index of rows
 
     # State
@@ -82,7 +83,8 @@ class StateSDVRP(NamedTuple):
             p=2, dim=-1
         )  # (batch_dim, 1)
 
-        # Not selected_demand is demand of first node (by clamp) so incorrect for nodes that visit depot!
+        # Not selected_demand is demand of first node (by clamp) so incorrect for
+        #  nodes that visit depot!
         selected_demand = self.demands_with_depot.gather(-1, prev_a[:, :, None])[
             :, :, 0
         ]
@@ -91,7 +93,8 @@ class StateSDVRP(NamedTuple):
         )
 
         # Increase capacity if depot is not visited, otherwise set to 0
-        # used_capacity = torch.where(selected == 0, 0, self.used_capacity + delivered_demand)
+        # used_capacity = torch.where(
+        #     selected == 0, 0, self.used_capacity + delivered_demand)
         used_capacity = (self.used_capacity + delivered_demand) * (prev_a != 0).float()
 
         # demands_with_depot = demands_with_depot.clone()[:, 0, :]
@@ -123,13 +126,14 @@ class StateSDVRP(NamedTuple):
 
     def get_mask(self):
         """
-        Gets a (batch_size, n_loc + 1) mask with the feasible actions (0 = depot), depends on already visited and
-        remaining capacity. 0 = feasible, 1 = infeasible
+        Gets a (batch_size, n_loc + 1) mask with the feasible actions (0 = depot),
+        depends on already visited and remaining capacity. 0 = feasible, 1 = infeasible
         Forbids to visit depot twice in a row, unless all nodes have been visited
         :return:
         """
 
-        # Nodes that cannot be visited are already visited or too much demand to be served now
+        # Nodes that cannot be visited are already visited or too much demand to be
+        #  served now
         mask_loc = (self.demands_with_depot[:, :, 1:] == 0) | (
             self.used_capacity[:, :, None] >= self.VEHICLE_CAPACITY
         )

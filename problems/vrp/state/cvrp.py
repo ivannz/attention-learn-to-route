@@ -8,8 +8,9 @@ class StateCVRP(NamedTuple):
     coords: torch.Tensor  # Depot + loc
     demand: torch.Tensor
 
-    # If this state contains multiple copies (i.e. beam search) for the same instance, then for memory efficiency
-    # the coords and demands tensors are not kept multiple times, so we need to use the ids to index the correct rows.
+    # If this state contains multiple copies (i.e. beam search) for the same instance,
+    #  then for memory efficiency the coords and demands tensors are not kept multiple
+    #  times, so we need to use the ids to index the correct rows.
     ids: torch.Tensor  # Keeps track of original fixed data index of rows
 
     # State
@@ -48,7 +49,8 @@ class StateCVRP(NamedTuple):
             cur_coord=self.cur_coord[key],
         )
 
-    # Warning: cannot override len of NamedTuple, len should be number of fields, not batch size
+    # Warning: cannot override len of NamedTuple, len should be number of fields,
+    #  not batch size
     # def __len__(self):
     #     return len(self.used_capacity)
 
@@ -68,7 +70,8 @@ class StateCVRP(NamedTuple):
             ],  # Add steps dimension
             prev_a=torch.zeros(batch_size, 1, dtype=torch.long, device=loc.device),
             used_capacity=demand.new_zeros(batch_size, 1),
-            visited_=(  # Visited as mask is easier to understand, as long more memory efficient
+            # Visited as mask is easier to understand, as long more memory efficient
+            visited_=(
                 # Keep visited_ with depot so we can scatter efficiently
                 torch.zeros(
                     batch_size, 1, n_loc + 1, dtype=torch.uint8, device=loc.device
@@ -116,16 +119,20 @@ class StateCVRP(NamedTuple):
             p=2, dim=-1
         )  # (batch_dim, 1)
 
-        # Not selected_demand is demand of first node (by clamp) so incorrect for nodes that visit depot!
-        # selected_demand = self.demand.gather(-1, torch.clamp(prev_a - 1, 0, n_loc - 1))
+        # Not selected_demand is demand of first node (by clamp) so incorrect for nodes
+        #  that visit depot!
+        # selected_demand = self.demand.gather(
+        #     -1, torch.clamp(prev_a - 1, 0, n_loc - 1))
         selected_demand = self.demand[self.ids, torch.clamp(prev_a - 1, 0, n_loc - 1)]
 
         # Increase capacity if depot is not visited, otherwise set to 0
-        # used_capacity = torch.where(selected == 0, 0, self.used_capacity + selected_demand)
+        # used_capacity = torch.where(
+        #     selected == 0, 0, self.used_capacity + selected_demand)
         used_capacity = (self.used_capacity + selected_demand) * (prev_a != 0).float()
 
         if self.visited_.dtype == torch.uint8:
-            # Note: here we do not subtract one as we have to scatter so the first column allows scattering depot
+            # Note: here we do not subtract one as we have to scatter so the first
+            #  column allows scattering depot
             # Add one dimension since we write a single value
             visited_ = self.visited_.scatter(-1, prev_a[:, :, None], 1)
         else:
@@ -152,8 +159,8 @@ class StateCVRP(NamedTuple):
 
     def get_mask(self):
         """
-        Gets a (batch_size, n_loc + 1) mask with the feasible actions (0 = depot), depends on already visited and
-        remaining capacity. 0 = feasible, 1 = infeasible
+        Gets a (batch_size, n_loc + 1) mask with the feasible actions (0 = depot),
+        depends on already visited and remaining capacity. 0 = feasible, 1 = infeasible
         Forbids to visit depot twice in a row, unless all nodes have been visited
         :return:
         """
@@ -163,12 +170,14 @@ class StateCVRP(NamedTuple):
         else:
             visited_loc = mask_long2bool(self.visited_, n=self.demand.size(-1))
 
-        # For demand steps_dim is inserted by indexing with id, for used_capacity insert node dim for broadcasting
+        # For demand steps_dim is inserted by indexing with id, for used_capacity insert
+        #  node dim for broadcasting
         exceeds_cap = (
             self.demand[self.ids, :] + self.used_capacity[:, :, None]
             > self.VEHICLE_CAPACITY
         )
-        # Nodes that cannot be visited are already visited or too much demand to be served now
+        # Nodes that cannot be visited are already visited or too much demand to be
+        #  served now
         mask_loc = visited_loc.to(exceeds_cap.dtype) | exceeds_cap
 
         # Cannot visit the depot if just visited and still unserved nodes
