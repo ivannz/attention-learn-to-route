@@ -1,5 +1,3 @@
-import warnings
-
 import torch
 import numpy as np
 import os
@@ -11,11 +9,12 @@ import torch.nn.functional as F
 
 
 def load_problem(name):
-    from problems import TSP, CVRP, SDVRP, OP, PCTSPDet, PCTSPStoch
+    from problems import TSP, CVRP, SDVRP, OP, AbsCVRP, PCTSPDet, PCTSPStoch
 
     problem = {
         "tsp": TSP,
         "cvrp": CVRP,
+        "abscvrp": AbsCVRP,
         "sdvrp": SDVRP,
         "op": OP,
         "pctsp_det": PCTSPDet,
@@ -38,7 +37,9 @@ def move_to(var, device):
 
 
 def _load_model_file(load_path, model):
-    """Loads the model with parameters from the file and returns optimizer state dict if it is in the file"""
+    """Loads the model with parameters from the file and returns optimizer state
+    dict if it is in the file.
+    """
 
     # Load the model parameters from a saved state
     load_optimizer_state_dict = None
@@ -196,7 +197,8 @@ def sample_many(inner_func, get_cost_func, input, batch_rep=1, iter_rep=1):
         pis.append(pi.view(batch_rep, -1, pi.size(-1)).transpose(0, 1))
 
     max_length = max(pi.size(-1) for pi in pis)
-    # (batch_size * batch_rep, iter_rep, max_length) => (batch_size, batch_rep * iter_rep, max_length)
+    # (batch_size * batch_rep, iter_rep, max_length)
+    #     => (batch_size, batch_rep * iter_rep, max_length)
     pis = torch.cat(
         [F.pad(pi, (0, max_length - pi.size(-1))) for pi in pis], 1
     )  # .view(embeddings.size(0), batch_rep * iter_rep, max_length)

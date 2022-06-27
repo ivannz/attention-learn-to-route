@@ -70,3 +70,53 @@ class SDVRP(BaseSDVRP):
     @staticmethod
     def make_dataset(*args, **kwargs):
         return VRPDataset(*args, **kwargs)
+
+
+class AbsVRPDataset(Dataset):
+    def __init__(
+        self, filename=None, size=50, num_samples=1000000, offset=0, distribution=None
+    ):
+        super().__init__()
+        assert filename is None
+
+        self.data_set = []
+        # From VRP with RL paper https://arxiv.org/abs/1802.04240
+        CAPACITIES = {10: 20.0, 20: 30.0, 50: 40.0, 100: 50.0}
+
+        self.data = []
+        for _ in range(num_samples):
+            loc = torch.rand(1 + size, 2)  # locations random in .uniform_(0, 1)
+            pairs = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+
+            # node demands,  Uniform 1 - 9, scaled by capacities
+            demand = torch.randint(1, 10, size=(1 + size,)) / CAPACITIES[size]
+            demand[0] = 0
+
+            # node type toekns
+            kinds = torch.empty(1 + size, dtype=int)
+            kinds[0] = 0
+            kinds[1:] = 1
+
+            self.data.append(
+                {
+                    "loc": None,
+                    "distances": pairs,
+                    "demand": demand,
+                    "kinds": kinds,
+                    "depot": None,
+                }
+            )
+
+        self.size = len(self.data)
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        return self.data[idx]
+
+
+class AbsCVRP(BaseCVRP):
+    @staticmethod
+    def make_dataset(*args, **kwargs):
+        return AbsVRPDataset(*args, **kwargs)
