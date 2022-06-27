@@ -99,11 +99,9 @@ class AbsVRPDataset(Dataset):
 
             self.data.append(
                 {
-                    "loc": None,
                     "distances": pairs,
                     "demand": demand,
                     "kinds": kinds,
-                    "depot": None,
                 }
             )
 
