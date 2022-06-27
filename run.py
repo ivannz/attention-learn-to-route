@@ -17,7 +17,6 @@ from reinforce_baselines import (
     WarmupBaseline,
 )
 from nets.attention_model import AttentionModel
-from nets.featureless_attention_model import FeaturelessAttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem
 
@@ -70,7 +69,6 @@ def run(opts):
     model_class = {
         "attention": AttentionModel,
         "pointer": PointerNetwork,
-        "featureless": FeaturelessAttentionModel,
     }.get(opts.model, None)
     assert model_class is not None, "Unknown model: {}".format(model_class)
     model = model_class(

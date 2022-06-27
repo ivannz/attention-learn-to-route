@@ -115,6 +115,8 @@ class AbsVRPDataset(Dataset):
 
 
 class AbsCVRP(BaseCVRP):
+    NAME = "abscvrp"  # Abstract Capacitated Vehicle Routing Problem
+
     @staticmethod
     def make_dataset(*args, **kwargs):
         return AbsVRPDataset(*args, **kwargs)

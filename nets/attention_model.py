@@ -19,8 +19,9 @@ def set_decode_type(model, decode_type):
 
 class AttentionModelFixed(NamedTuple):
     """
-    Context for AttentionModel decoder that is fixed during decoding so can be precomputed/cached
-    This class allows for efficient indexing of multiple Tensors at once
+    Context for AttentionModel decoder that is fixed during decoding so can be
+    precomputed/cached. This class allows for efficient indexing of multiple
+    Tensors at once.
     """
 
     node_embeddings: torch.Tensor
@@ -64,6 +65,7 @@ class AttentionModel(nn.Module):
         self.temp = 1.0
         self.allow_partial = problem.NAME == "sdvrp"
         self.is_vrp = problem.NAME == "cvrp" or problem.NAME == "sdvrp"
+        self.is_abscvrp = problem.NAME == "abscvrp"
         self.is_orienteering = problem.NAME == "op"
         self.is_pctsp = problem.NAME == "pctsp"
 
@@ -78,8 +80,12 @@ class AttentionModel(nn.Module):
         self.shrink_size = shrink_size
 
         # Problem specific context parameters (placeholder and step context dimension)
-        if self.is_vrp or self.is_orienteering or self.is_pctsp:
-            # Embedding of last node + remaining_capacity / remaining length / remaining prize to collect
+        if self.is_abscvrp:
+            pass
+
+        elif self.is_vrp or self.is_orienteering or self.is_pctsp:
+            # Embedding of last node + remaining_capacity, remaining length, or
+            #  remaining prize to collect
             step_context_dim = embedding_dim + 1
 
             if self.is_pctsp:
@@ -105,7 +111,11 @@ class AttentionModel(nn.Module):
                 -1, 1
             )  # Placeholder should be in range of activations
 
-        self.init_embed = nn.Linear(node_dim, embedding_dim)
+        if self.is_abscvrp:
+            pass
+
+        else:
+            self.init_embed = nn.Linear(node_dim, embedding_dim)
 
         self.embedder = GraphAttentionEncoder(
             n_heads=n_heads,
@@ -114,7 +124,8 @@ class AttentionModel(nn.Module):
             normalization=normalization,
         )
 
-        # For each node we compute (glimpse key, glimpse value, logit key) so 3 * embedding_dim
+        # For each node we compute (glimpse key, glimpse value, logit key)
+        #  so 3 * embedding_dim
         self.project_node_embeddings = nn.Linear(
             embedding_dim, 3 * embedding_dim, bias=False
         )
@@ -123,7 +134,8 @@ class AttentionModel(nn.Module):
             step_context_dim, embedding_dim, bias=False
         )
         assert embedding_dim % n_heads == 0
-        # Note n_heads * val_dim == embedding_dim so input to project_out is embedding_dim
+        # Note n_heads * val_dim == embedding_dim so input to project_out is
+        #  `embedding_dim`
         self.project_out = nn.Linear(embedding_dim, embedding_dim, bias=False)
 
     def set_decode_type(self, decode_type, temp=None):
@@ -133,8 +145,10 @@ class AttentionModel(nn.Module):
 
     def forward(self, input, return_pi=False):
         """
-        :param input: (batch_size, graph_size, node_dim) input node features or dictionary with multiple tensors
-        :param return_pi: whether to return the output sequences, this is optional as it is not compatible with
+        :param input: (batch_size, graph_size, node_dim) input node features or
+            dictionary with multiple tensors
+        :param return_pi: whether to return the output sequences, this is optional
+            as it is not compatible with
         using DataParallel as the results may be of different lengths on different GPUs
         :return:
         """
@@ -149,8 +163,9 @@ class AttentionModel(nn.Module):
         _log_p, pi = self._inner(input, embeddings)
 
         cost, mask = self.problem.get_costs(input, pi)
-        # Log likelyhood is calculated within the model since returning it per action does not work well with
-        # DataParallel since sequences can be of different lengths
+        # Log likelyhood is calculated within the model since returning it per
+        # action does not work well with DataParallel since sequences can be of
+        # different lengths
         ll = self._calc_log_likelihood(_log_p, pi, mask)
         if return_pi:
             return cost, ll, pi
@@ -162,8 +177,9 @@ class AttentionModel(nn.Module):
 
     def precompute_fixed(self, input):
         embeddings, _ = self.embedder(self._init_embed(input))
-        # Use a CachedLookup such that if we repeatedly index this object with the same index we only need to do
-        # the lookup once... this is the case if all elements in the batch have maximum batch size
+        # Use a CachedLookup such that if we repeatedly index this object with the
+        # same index we only need to do the lookup once... this is the case if all
+        # elements in the batch have maximum batch size
         return CachedLookup(self._precompute(embeddings))
 
     def propose_expansions(
@@ -188,7 +204,8 @@ class AttentionModel(nn.Module):
         flat_score = score_expand.view(-1)
         flat_feas = flat_score > -1e10  # != -math.inf triggers
 
-        # Parent is row idx of ind_topk, can be found by enumerating elements and dividing by number of columns
+        # Parent is row idx of ind_topk, can be found by enumerating elements and
+        # dividing by number of columns
         flat_parent = torch.arange(
             flat_action.size(-1), out=flat_action.new()
         ) // ind_topk.size(-1)
@@ -209,7 +226,8 @@ class AttentionModel(nn.Module):
         # Get log_p corresponding to selected actions
         log_p = _log_p.gather(2, a.unsqueeze(-1)).squeeze(-1)
 
-        # Optional: mask out actions irrelevant to objective so they do not get reinforced
+        # Optional: mask out actions irrelevant to objective so they do not get
+        # reinforced
         if mask is not None:
             log_p[mask] = 0
 
@@ -222,14 +240,20 @@ class AttentionModel(nn.Module):
 
     def _init_embed(self, input):
 
-        if self.is_vrp or self.is_orienteering or self.is_pctsp:
+        if self.is_abscvrp:
+            raise NotImplementedError
+
+        elif self.is_vrp or self.is_orienteering or self.is_pctsp:
             if self.is_vrp:
                 features = ("demand",)
+
             elif self.is_orienteering:
                 features = ("prize",)
+
             else:
                 assert self.is_pctsp
                 features = ("deterministic_prize", "penalty")
+
             return torch.cat(
                 (
                     self.init_embed_depot(input["depot"])[:, None, :],
@@ -255,7 +279,8 @@ class AttentionModel(nn.Module):
 
         state = self.problem.make_state(input)
 
-        # Compute keys, values for the glimpse and keys for the logits once as they can be reused in every step
+        # Compute keys, values for the glimpse and keys for the logits once as
+        #  they can be reused in every step
         fixed = self._precompute(embeddings)
 
         batch_size = state.ids.size(0)
@@ -269,8 +294,9 @@ class AttentionModel(nn.Module):
                 if len(unfinished) == 0:
                     break
                 unfinished = unfinished[:, 0]
-                # Check if we can shrink by at least shrink_size and if this leaves at least 16
-                # (otherwise batch norm will not work well and it is inefficient anyway)
+                # Check if we can shrink by at least shrink_size and if this leaves
+                #  at least 16 (otherwise batch norm will not work well and it is
+                #  inefficient anyway)
                 if 16 <= len(unfinished) <= state.ids.size(0) - self.shrink_size:
                     # Filter states
                     state = state[unfinished]
@@ -278,7 +304,8 @@ class AttentionModel(nn.Module):
 
             log_p, mask = self._get_log_p(fixed, state)
 
-            # Select the indices of the next nodes in the sequences, result (batch_size) long
+            # Select the indices of the next nodes in the sequences, result
+            #  (batch_size) long
             selected = self._select_node(
                 log_p.exp()[:, 0, :], mask[:, 0, :]
             )  # Squeeze out steps dimension
@@ -337,7 +364,8 @@ class AttentionModel(nn.Module):
             selected = probs.multinomial(1).squeeze(1)
 
             # Check if sampling went OK, can go wrong due to bug on GPU
-            # See https://discuss.pytorch.org/t/bad-behavior-of-multinomial-function/10232
+            # https://discuss.pytorch.org/t/bad-behavior-of-multinomial-function/10232
+            # XXX purportedly fixed in torch > 1.8
             while mask.gather(1, selected.unsqueeze(-1)).data.any():
                 print("Sampled bad values, resampling!")
                 selected = probs.multinomial(1).squeeze(1)
@@ -348,12 +376,15 @@ class AttentionModel(nn.Module):
 
     def _precompute(self, embeddings, num_steps=1):
 
-        # The fixed context projection of the graph embedding is calculated only once for efficiency
+        # The fixed context projection of the graph embedding is calculated only
+        #  once for efficiency
         graph_embed = embeddings.mean(1)
-        # fixed context = (batch_size, 1, embed_dim) to make broadcastable with parallel timesteps
+        # fixed context = (batch_size, 1, embed_dim) to make broadcastable with
+        #  parallel timesteps
         fixed_context = self.project_fixed_context(graph_embed)[:, None, :]
 
-        # The projection of the node embeddings for the attention is calculated once up front
+        # The projection of the node embeddings for the attention is calculated
+        #  once up front
         (
             glimpse_key_fixed,
             glimpse_val_fixed,
@@ -377,12 +408,15 @@ class AttentionModel(nn.Module):
         if k is not None and k < log_p.size(-1):
             return log_p.topk(k, -1)
 
-        # Return all, note different from torch.topk this does not give error if less than k elements along dim
+        # Return all, note different from torch.topk this does not give error if
+        #  less than k elements along dim
         return (
             log_p,
-            torch.arange(log_p.size(-1), device=log_p.device, dtype=torch.int64).repeat(
-                log_p.size(0), 1
-            )[:, None, :],
+            torch.arange(
+                log_p.size(-1),
+                device=log_p.device,
+                dtype=torch.int64,
+            ).repeat(log_p.size(0), 1)[:, None, :],
         )
 
     def _get_log_p(self, fixed, state, normalize=True):
@@ -412,22 +446,28 @@ class AttentionModel(nn.Module):
 
     def _get_parallel_step_context(self, embeddings, state, from_depot=False):
         """
-        Returns the context per step, optionally for multiple steps at once (for efficient evaluation of the model)
+        Returns the context per step, optionally for multiple steps at once (for
+        efficient evaluation of the model)
 
         :param embeddings: (batch_size, graph_size, embed_dim)
         :param prev_a: (batch_size, num_steps)
-        :param first_a: Only used when num_steps = 1, action of first step or None if first step
+        :param first_a: Only used when num_steps = 1, action of first step or
+            None if first step
         :return: (batch_size, num_steps, context_dim)
         """
 
         current_node = state.get_current_node()
         batch_size, num_steps = current_node.size()
 
-        if self.is_vrp:
+        if self.is_abscvrp:
+            raise NotImplementedError
+
+        elif self.is_vrp:
             # Embedding of previous node + remaining capacity
             if from_depot:
-                # 1st dimension is node idx, but we do not squeeze it since we want to insert step dimension
-                # i.e. we actually want embeddings[:, 0, :][:, None, :] which is equivalent
+                # 1st dimension is node idx, but we do not squeeze it since we want
+                #  to insert step dimension i.e. we actually want
+                #  embeddings[:, 0, :][:, None, :] which is equivalent
                 return torch.cat(
                     (
                         embeddings[:, 0:1, :].expand(
@@ -473,9 +513,8 @@ class AttentionModel(nn.Module):
             )
         else:  # TSP
 
-            if (
-                num_steps == 1
-            ):  # We need to special case if we have only 1 step, may be the first or not
+            # We need to special case if we have only 1 step, may be the first or not
+            if num_steps == 1:
                 if state.i.item() == 0:
                     # First and only step, ignore prev_a (this is a placeholder)
                     return self.W_placeholder[None, None, :].expand(
@@ -488,6 +527,7 @@ class AttentionModel(nn.Module):
                             batch_size, 2, embeddings.size(-1)
                         ),
                     ).view(batch_size, 1, -1)
+
             # More than one step, assume always starting with first
             embeddings_per_step = embeddings.gather(
                 1,
@@ -501,7 +541,8 @@ class AttentionModel(nn.Module):
                     self.W_placeholder[None, None, :].expand(
                         batch_size, 1, self.W_placeholder.size(-1)
                     ),
-                    # Second step, concatenate embedding of first with embedding of current/previous (in dim 2, context dim)
+                    # Second step, concatenate embedding of first with embedding
+                    #  of current/previous (in dim 2, context dim)
                     torch.cat(
                         (
                             embeddings_per_step[:, 0:1, :].expand(
@@ -520,12 +561,14 @@ class AttentionModel(nn.Module):
         batch_size, num_steps, embed_dim = query.size()
         key_size = val_size = embed_dim // self.n_heads
 
-        # Compute the glimpse, rearrange dimensions so the dimensions are (n_heads, batch_size, num_steps, 1, key_size)
+        # Compute the glimpse, rearrange dimensions so the dimensions are
+        #    (n_heads, batch_size, num_steps, 1, key_size)
         glimpse_Q = query.view(
             batch_size, num_steps, self.n_heads, 1, key_size
         ).permute(2, 0, 1, 3, 4)
 
-        # Batch matrix multiplication to compute compatibilities (n_heads, batch_size, num_steps, graph_size)
+        # Batch matrix multiplication to compute compatibilities
+        #    (n_heads, batch_size, num_steps, graph_size)
         compatibility = torch.matmul(
             glimpse_Q, glimpse_K.transpose(-2, -1)
         ) / math.sqrt(glimpse_Q.size(-1))
@@ -535,20 +578,24 @@ class AttentionModel(nn.Module):
                 mask[None, :, :, None, :].expand_as(compatibility)
             ] = -math.inf
 
-        # Batch matrix multiplication to compute heads (n_heads, batch_size, num_steps, val_size)
+        # Batch matrix multiplication to compute heads
+        #    (n_heads, batch_size, num_steps, val_size)
         heads = torch.matmul(torch.softmax(compatibility, dim=-1), glimpse_V)
 
-        # Project to get glimpse/updated context node embedding (batch_size, num_steps, embedding_dim)
+        # Project to get glimpse/updated context node embedding
+        #    (batch_size, num_steps, embedding_dim)
         glimpse = self.project_out(
             heads.permute(1, 2, 3, 0, 4)
             .contiguous()
             .view(-1, num_steps, 1, self.n_heads * val_size)
         )
 
-        # Now projecting the glimpse is not needed since this can be absorbed into project_out
+        # Now projecting the glimpse is not needed since this can be absorbed
+        #    into project_out
         # final_Q = self.project_glimpse(glimpse)
         final_Q = glimpse
-        # Batch matrix multiplication to compute logits (batch_size, num_steps, graph_size)
+        # Batch matrix multiplication to compute logits
+        #    (batch_size, num_steps, graph_size)
         # logits = 'compatibility'
         logits = torch.matmul(final_Q, logit_K.transpose(-2, -1)).squeeze(
             -2
@@ -564,15 +611,20 @@ class AttentionModel(nn.Module):
 
     def _get_attention_node_data(self, fixed, state):
 
-        if self.is_vrp and self.allow_partial:
+        if self.is_abscvrp:
+            raise NotImplementedError
 
-            # Need to provide information of how much each node has already been served
-            # Clone demands as they are needed by the backprop whereas they are updated later
+        elif self.is_vrp and self.allow_partial:
+
+            # Need to provide information of how much each node has already been
+            #  served. Clone demands as they are needed by the backprop whereas
+            #  they are updated later
             glimpse_key_step, glimpse_val_step, logit_key_step = self.project_node_step(
                 state.demands_with_depot[:, :, :, None].clone()
             ).chunk(3, dim=-1)
 
-            # Projection of concatenation is equivalent to addition of projections but this is more efficient
+            # Projection of concatenation is equivalent to addition of projections
+            #  but this is more efficient
             return (
                 fixed.glimpse_key + self._make_heads(glimpse_key_step),
                 fixed.glimpse_val + self._make_heads(glimpse_val_step),
