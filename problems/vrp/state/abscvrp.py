@@ -49,7 +49,7 @@ class AbsCVRP(NamedTuple):
             instance=torch.arange(len(dis), device=dis.device),
             demand=dem,
             mask=dem.le(0),
-            capacity=dis.new_zeros(len(dis)).fill_(cls.MAX_CAPACITY),
+            capacity=dem.new_zeros(len(dis)).fill_(cls.MAX_CAPACITY),
             done=dis.new_zeros(len(dis), dtype=bool),
             loc=dis.new_zeros(len(dis), dtype=torch.long),
             cost=dis.new_zeros(len(dis)),
@@ -263,21 +263,21 @@ if __name__ == "__main__":
     # the depot has infinite supply
     x[:, 0] = -float("inf")
 
-    input = dict(distances=e, demand=x, partial=False)
+    input = dict(distances=e, demand=x, partial=True)
 
     state = AbsCVRP.initialize(input)
     history = []
     out = beam_search(
         state,
         k=9,
-        propose=partial(propose, k=3, kind="dummy"),
+        propose=partial(propose, k=3, kind="greedy"),
         commit=history.append,
     )
 
     # backtrack thru the saved beam history and rebuild the sequence
     #  $\pi_{t:} = \pi_t \circ \pi_{t+1:}$
     actions = []
-    beam = out.select(1, largest=True)
+    beam = last = out.select(1, largest=True)
     parent, score = beam.parent, beam.score
     # parent, score = slice(None), history[-1].score
     while history:
