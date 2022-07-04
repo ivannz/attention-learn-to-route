@@ -9,8 +9,8 @@ _unused = object()
 
 class AbsCVRP(NamedTuple):
     # B -- batch, S -- search (beamsearch)
-    # boolean flag, specifying if demands can be partially satisfied
-    partial: bool
+    # [B] boolean flag, specifying if demands can be partially satisfied
+    partial: Tensor
     # [B x N x N] large dense shortest path matrix used as reference
     distances: Tensor
     # [S] index to instance correspondence S -->> B surjective
@@ -85,11 +85,21 @@ class AbsCVRP(NamedTuple):
         satisfied = demand.le(0.0)
         at_depot = selected.eq(0)
 
-        mask = satisfied.logical_or(capacity.unsqueeze(-1).le(0.0))
-        if self.partial:
-            mask.logical_or_(demand.gt(capacity.unsqueeze(-1)))
+        # f_{bi} = `i` forbidden at `b` if `(d_{bi} \leq 0) OR (c_b \leq 0)`
+        mask = satisfied.logical_or(capacity.le(0.0).unsqueeze(-1))
 
-        mask[:, 0] = demand.gt(0).any(-1).logical_and_(at_depot)
+        # if partial deliveries are NOT allowed, then forbid unserviceables
+        #  f_{bi} |= (d_{b i} > c_b) AND NOT p_b
+        not_partial = self.partial[self.instance].logical_not().unsqueeze(-1)
+        mask.logical_or_(demand.gt(capacity.unsqueeze(-1)).logical_and(not_partial))
+
+        # finally allow the depot if not currently in it, unless all clients
+        #  have been satisfied
+        #  f_{b0} = (\ell_b = 0) AND (\cup_{i \neq 0} (d_{bi} > 0))
+        mask[:, 0] = demand.gt(0.0).any(-1).logical_and_(at_depot)
+
+        # re-raise the finish flag
+        #  d_b |= (\ell_b = 0) AND (\cap_{i \neq 0} (d_{bi} \leq 0))
         done = satisfied.all(-1).logical_and_(at_depot).logical_or_(self.done)
 
         # return the updated state
@@ -271,14 +281,18 @@ if __name__ == "__main__":
     # the depot has infinite supply
     x[:, 0] = -float("inf")
 
-    input = dict(distances=e, demand=x, partial=True)
+    p = torch.randint(0, 2, size=(n_batch_size,), dtype=bool)
+
+    # e[:] = e[[0]]
+    # x[:] = x[[0]]
+    input = dict(distances=e, demand=x, partial=p)
 
     state = AbsCVRP.initialize(input)
     history = []
     out = beam_search(
         state,
         k=9,
-        propose=partial(propose, k=3, kind="greedy"),
+        propose=partial(propose, k=9, kind="greedy"),
         commit=history.append,
     )
 
