@@ -118,6 +118,10 @@ class AbsCVRP(NamedTuple):
         return self.demand.le(0.0)
 
     @property
+    def ids(self):
+        return self.instance
+
+    @property
     def dist(self):
         return self.distances
 
@@ -132,7 +136,7 @@ class AbsCVRP(NamedTuple):
         return self.done
 
     def get_current_node(self):
-        return self.loc
+        return self.loc.unsqueeze(-1)
 
     def get_mask(self):
         return self.mask
