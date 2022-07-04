@@ -1,6 +1,7 @@
 import torch
 
 from problems.vrp.state.cvrp import StateCVRP
+from problems.vrp.state.abscvrp import AbsCVRP as StateAbsCVRP
 from utils.beam_search import beam_search
 
 
@@ -157,7 +158,7 @@ class AbsCVRP:
 
     @staticmethod
     def make_state(*args, **kwargs):
-        return AbsCVRP.initialize(*args, **kwargs)
+        return StateAbsCVRP.initialize(*args, **kwargs)
 
     @classmethod
     def beam_search(
