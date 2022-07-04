@@ -478,7 +478,11 @@ class AttentionModel(nn.Module):
         batch_size, num_steps = current_node.size()
 
         if self.is_abscvrp:
-            raise NotImplementedError
+            assert num_steps == 1
+
+            idx = torch.arange(batch_size, device=current_node.device).unsqueeze(-1)
+            cap = state.capacity.reshape(-1, 1, 1)
+            return torch.cat((embeddings[idx, current_node], cap), -1)
 
         elif self.is_vrp:
             # Embedding of previous node + remaining capacity
