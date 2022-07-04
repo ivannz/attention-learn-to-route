@@ -115,7 +115,11 @@ class AttentionModel(nn.Module):
         if self.is_abscvrp:
             # we've got two types of nodes: depots and clients
             self.node_type_embedding = nn.Embedding(2, embedding_dim)
-            self.init_embed = nn.Linear(node_dim, embedding_dim, bias=False)
+            self.init_embed = nn.Sequential(
+                nn.Linear(node_dim, 2 * embedding_dim, bias=True),
+                nn.ReLU(),
+                nn.Linear(2 * embedding_dim, embedding_dim, bias=True),
+            )
 
         else:
             self.init_embed = nn.Linear(node_dim, embedding_dim)
@@ -248,10 +252,11 @@ class AttentionModel(nn.Module):
     def _init_embed(self, input):
 
         if self.is_abscvrp:
+            # demand has -ve infinte demand (supply)
+            demand = input["demand"].unsqueeze(-1).clamp_min(-1)
             return {
                 "nodes": (
-                    self.node_type_embedding(input["kinds"])
-                    + self.init_embed(input["demand"].unsqueeze(-1))
+                    self.node_type_embedding(input["kinds"]) + self.init_embed(demand)
                 ),
                 "edges": input["distances"],
             }
