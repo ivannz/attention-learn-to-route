@@ -252,13 +252,24 @@ class AttentionModel(nn.Module):
     def _init_embed(self, input):
 
         if self.is_abscvrp:
+
+            if "locations" in input:
+                loc = input["locations"]
+                dis = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+
+            elif "distances" in input:
+                dis = input["distances"]
+
+            else:
+                raise TypeError(f"Bad CVRP problem instance `{list(input.keys())}`.")
+
             # demand has -ve infinte demand (supply)
             demand = input["demand"].unsqueeze(-1).clamp_min(-1)
             return {
                 "nodes": (
                     self.node_type_embedding(input["kinds"]) + self.init_embed(demand)
                 ),
-                "edges": input["distances"],
+                "edges": dis,
             }
 
         elif self.is_vrp or self.is_orienteering or self.is_pctsp:
