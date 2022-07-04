@@ -104,7 +104,6 @@ class AbsCVRP:
 
     @classmethod
     def get_costs(cls, dataset, pi):
-
         batch_size, graph_size = dataset["demand"].size()
         # Check that tours are valid, i.e. contain 0 to n -1
         sorted_pi = pi.data.sort(1)[0]
@@ -133,7 +132,16 @@ class AbsCVRP:
         end = torch.full_like(pi[:, :1], 0)
         pad = torch.cat((end, pi, end), dim=-1)
 
-        dist = dataset["distances"]
+        if "locations" in dataset:
+            loc = dataset["locations"]
+            dist = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+
+        elif "distances" in dataset:
+            dist = dataset["distances"]
+
+        else:
+            raise TypeError(f"Bad CVRP problem instance `{list(input.keys())}`.")
+
         idx = torch.arange(len(dist), device=dist.device).unsqueeze(-1)
         return dist[idx, pad[:, :-1], pad[:, 1:]].sum(-1), None
 

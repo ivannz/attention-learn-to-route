@@ -36,7 +36,17 @@ class AbsCVRP(NamedTuple):
     def initialize(cls, input, visited_dtype=_unused):
         assert visited_dtype is _unused
 
-        dis, dem = input["distances"], input["demand"]
+        if "locations" in input:
+            loc = input["locations"]
+            dis = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+
+        elif "distances" in input:
+            dis = input["distances"]
+
+        else:
+            raise TypeError(f"Bad CVRP problem instance `{list(input.keys())}`.")
+
+        dem = input["demand"]
         assert dem.le(cls.MAX_CAPACITY).all()  # must not exceed unit capacity
 
         # start at the depot

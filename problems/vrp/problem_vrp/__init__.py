@@ -93,7 +93,7 @@ class AbsVRPDataset(Dataset):
         self.data = []
         for _ in range(num_samples):
             loc = torch.rand(1 + size, 2)  # locations random in .uniform_(0, 1)
-            pairs = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+            # pairs = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
 
             # node demands,  Uniform 1 - 9, scaled by capacities
             demand = torch.randint(1, 10, size=(1 + size,)) / CAPACITIES[size]
@@ -107,7 +107,8 @@ class AbsVRPDataset(Dataset):
             self.data.append(
                 {
                     "partial": partial,
-                    "distances": pairs,
+                    # "distances": pairs,
+                    "locations": loc,
                     "demand": demand,
                     "kinds": kinds,
                 }
