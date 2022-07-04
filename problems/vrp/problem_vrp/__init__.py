@@ -5,6 +5,7 @@ import pickle
 
 from problems.vrp.problem_vrp.cvrp import CVRP as BaseCVRP
 from problems.vrp.problem_vrp.sdvrp import SDVRP as BaseSDVRP
+from problems.vrp.problem_vrp.cvrp import AbsCVRP as BaseAbsCVRP
 
 
 def make_instance(args):
@@ -90,7 +91,7 @@ class AbsVRPDataset(Dataset):
 
             # node demands,  Uniform 1 - 9, scaled by capacities
             demand = torch.randint(1, 10, size=(1 + size,)) / CAPACITIES[size]
-            demand[0] = 0
+            demand[0] = -float("inf")
 
             # node type toekns
             kinds = torch.empty(1 + size, dtype=int)
@@ -114,7 +115,7 @@ class AbsVRPDataset(Dataset):
         return self.data[idx]
 
 
-class AbsCVRP(BaseCVRP):
+class AbsCVRP(BaseAbsCVRP):
     NAME = "abscvrp"  # Abstract Capacitated Vehicle Routing Problem
 
     @staticmethod
