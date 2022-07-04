@@ -634,7 +634,8 @@ class AttentionModel(nn.Module):
     def _get_attention_node_data(self, fixed, state):
 
         if self.is_abscvrp:
-            raise NotImplementedError
+            # raise NotImplementedError
+            pass
 
         elif self.is_vrp and self.allow_partial:
 

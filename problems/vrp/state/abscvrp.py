@@ -118,6 +118,10 @@ class AbsCVRP(NamedTuple):
         return self.demand.le(0.0)
 
     @property
+    def demands_with_depot(self):
+        return self.demand.clamp_min(-self.MAX_CAPACITY).unsqueeze(1)
+
+    @property
     def ids(self):
         return self.instance
 
@@ -139,7 +143,7 @@ class AbsCVRP(NamedTuple):
         return self.loc.unsqueeze(-1)
 
     def get_mask(self):
-        return self.mask
+        return self.mask.unsqueeze(1)
 
     def construct_solutions(self, actions):
         return actions
