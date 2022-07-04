@@ -75,7 +75,13 @@ class SDVRP(BaseSDVRP):
 
 class AbsVRPDataset(Dataset):
     def __init__(
-        self, filename=None, size=50, num_samples=1000000, offset=0, distribution=None
+        self,
+        filename=None,
+        size=50,
+        partial=False,
+        num_samples=1000000,
+        offset=0,
+        distribution=None,
     ):
         super().__init__()
         assert filename is None
@@ -100,6 +106,7 @@ class AbsVRPDataset(Dataset):
 
             self.data.append(
                 {
+                    "partial": partial,
                     "distances": pairs,
                     "demand": demand,
                     "kinds": kinds,
