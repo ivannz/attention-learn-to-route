@@ -110,12 +110,10 @@ class AbsCVRP:
         sorted_pi = pi.data.sort(1)[0]
 
         # Sorting it should give all zeros at front and then 1...n
-        assert (
-            torch.arange(1, graph_size, out=pi.data.new())
-            .view(1, -1)
-            .expand(batch_size, graph_size)
-            == sorted_pi[:, -graph_size:]
-        ).all() and (sorted_pi[:, :-graph_size] == 0).all(), "Invalid tour"
+        arange = torch.arange(0, graph_size, out=pi.data.new())
+        assert (arange.unsqueeze(0) == sorted_pi[:, -graph_size:]).all() and (
+            sorted_pi[:, :-graph_size] == 0
+        ).all(), "Invalid tour"
 
         # clamp supply at -capacity
         dem = dataset["demand"].gather(1, pi)
