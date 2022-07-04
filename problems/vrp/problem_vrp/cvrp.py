@@ -134,7 +134,7 @@ class AbsCVRP:
 
         if "locations" in dataset:
             loc = dataset["locations"]
-            dist = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+            dist = torch.norm(loc.unsqueeze(-3) - loc.unsqueeze(-2), p=2, dim=-1)
 
         elif "distances" in dataset:
             dist = dataset["distances"]

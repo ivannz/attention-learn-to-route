@@ -255,7 +255,7 @@ class AttentionModel(nn.Module):
 
             if "locations" in input:
                 loc = input["locations"]
-                dis = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+                dis = torch.norm(loc.unsqueeze(-3) - loc.unsqueeze(-2), p=2, dim=-1)
 
             elif "distances" in input:
                 dis = input["distances"]
