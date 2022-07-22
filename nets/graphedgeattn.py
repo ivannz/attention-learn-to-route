@@ -120,8 +120,10 @@ class EdgeWeightedTransformerLayer(nn.Module):
         layernorm: nn.Module = nn.LayerNorm,
         gelu: nn.Module = nn.GELU,
         elementwise_affine: bool = True,
+        postnormalize: bool = False,
     ) -> None:
         super().__init__()
+        self.postnormalize = postnormalize
 
         # we use pre-norm MH self-A, but optionally disable the learnable affine
         # transformation in the normalizer before the MHA, since it makes sense
@@ -144,9 +146,38 @@ class EdgeWeightedTransformerLayer(nn.Module):
         )
 
     def forward(self, x: Tensor, e: Tensor, mask: Tensor = None) -> Tensor:
+        if self.postnormalize:
+            x = self.pn1(x + self.mha(x, e, mask))
+            x = self.pn2(x + self.mlp(x))
+            return x
+
         x = x + self.mha(self.pn1(x), e, mask)
         x = x + self.mlp(self.pn2(x))
         return x
+
+
+class BatchSeqNorm(nn.BatchNorm1d):
+    def __init__(
+        self,
+        normalized_shape,
+        eps=1e-05,
+        elementwise_affine=True,
+        device=None,
+        dtype=None,
+    ):
+        super().__init__(
+            normalized_shape,
+            eps,
+            momentum=0.1,
+            affine=elementwise_affine,
+            track_running_stats=True,
+            device=device,
+            dtype=dtype,
+        )
+
+    def forward(self, input):
+        x = super().forward(rearrange(input, "B N D -> (B N) D"))
+        return rearrange(x, "(B N) D -> B N D", B=len(input))
 
 
 class EdgeWeightedGraphEncoder(nn.Module):
@@ -167,9 +198,10 @@ class EdgeWeightedGraphEncoder(nn.Module):
                     embed_dim,
                     n_heads,
                     feed_forward_hidden,
-                    layernorm=nn.LayerNorm,
+                    layernorm=BatchSeqNorm,
                     gelu=nn.ReLU,
                     elementwise_affine=True,
+                    postnormalize=True,
                 )
                 for _ in range(n_layers)
             )
@@ -202,3 +234,5 @@ if __name__ == "__main__":
         {"nodes": x, "edges": e},
         torch.rand(3, 51, 51).lt(0.25),
     )
+
+    print(out)
