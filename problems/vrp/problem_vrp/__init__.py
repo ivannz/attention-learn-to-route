@@ -73,6 +73,26 @@ class SDVRP(BaseSDVRP):
         return VRPDataset(*args, **kwargs)
 
 
+def make_absvrp_instance(args):
+    depot, loc, demand, capacity, *args = args
+    assert not args
+
+    partial = False
+
+    locations = torch.tensor([depot] + loc, dtype=torch.float)
+    demand = torch.tensor([-float("inf")] + demand, dtype=torch.float)
+
+    kinds = torch.full(demand.shape, 1, dtype=int)
+    kinds[0] = 0
+
+    return {
+        "partial": partial,
+        "locations": locations,
+        "demand": demand / capacity,
+        "kinds": kinds,
+    }
+
+
 class AbsVRPDataset(Dataset):
     def __init__(
         self,
@@ -84,9 +104,21 @@ class AbsVRPDataset(Dataset):
         distribution=None,
     ):
         super().__init__()
-        assert filename is None
 
-        self.data_set = []
+        if filename is not None:
+            assert os.path.splitext(filename)[1] == ".pkl"
+
+            data = pickle.load(open(filename, "rb"))
+            self.data = list(
+                map(
+                    make_absvrp_instance,
+                    data[offset : offset + num_samples],
+                )
+            )
+
+            self.size = len(self.data)
+            return
+
         # From VRP with RL paper https://arxiv.org/abs/1802.04240
         CAPACITIES = {10: 20.0, 20: 30.0, 50: 40.0, 100: 50.0}
 
@@ -99,7 +131,7 @@ class AbsVRPDataset(Dataset):
             demand = torch.randint(1, 10, size=(1 + size,)) / CAPACITIES[size]
             demand[0] = -float("inf")
 
-            # node type toekns
+            # node type tokens
             kinds = torch.empty(1 + size, dtype=int)
             kinds[0] = 0
             kinds[1:] = 1
