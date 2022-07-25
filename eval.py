@@ -17,7 +17,8 @@ mp = torch.multiprocessing.get_context("spawn")
 
 def get_best(sequences, cost, ids=None, batch_size=None):
     """
-    Ids contains [0, 0, 0, 1, 1, 2, ..., n, n, n] if 3 solutions found for 0th instance, 2 for 1st, etc
+    Ids contains [0, 0, 0, 1, 1, 2, ..., n, n, n] if 3 solutions found for
+     0th instance, 2 for 1st, etc
     :param sequences:
     :param lengths:
     :param ids:
@@ -49,7 +50,9 @@ def eval_dataset_mp(args):
     model, _ = load_model(opts.model)
     val_size = opts.val_size // num_processes
     dataset = model.problem.make_dataset(
-        filename=dataset_path, num_samples=val_size, offset=opts.offset + val_size * i
+        filename=dataset_path,
+        num_samples=val_size,
+        offset=opts.offset + val_size * i,
     )
     device = torch.device("cuda:{}".format(i))
 
@@ -57,7 +60,8 @@ def eval_dataset_mp(args):
 
 
 def eval_dataset(dataset_path, width, softmax_temp, opts):
-    # Even with multiprocessing, we load the model here since it contains the name where to write results
+    # Even with multiprocessing, we load the model here since it contains
+    #  the name where to write results
     model, _ = load_model(opts.model)
     use_cuda = torch.cuda.is_available() and not opts.no_cuda
     if opts.multiprocessing:
@@ -85,7 +89,8 @@ def eval_dataset(dataset_path, width, softmax_temp, opts):
         )
         results = _eval_dataset(model, dataset, width, softmax_temp, opts, device)
 
-    # This is parallelism, even if we use multiprocessing (we report as if we did not use multiprocessing, e.g. 1 GPU)
+    # This is parallelism, even if we use multiprocessing (we report as if we
+    #  did not use multiprocessing, e.g. 1 GPU)
     parallelism = opts.eval_batch_size
 
     costs, tours, durations = zip(
@@ -209,7 +214,7 @@ def _eval_dataset(model, dataset, width, softmax_temp, opts, device):
         for seq, cost in zip(sequences, costs):
             if model.problem.NAME == "tsp":
                 seq = seq.tolist()  # No need to trim as all are same length
-            elif model.problem.NAME in ("cvrp", "sdvrp"):
+            elif model.problem.NAME in ("cvrp", "sdvrp", "abscvrp"):
                 seq = np.trim_zeros(seq).tolist() + [0]  # Add depot
             elif model.problem.NAME in ("op", "pctsp"):
                 seq = np.trim_zeros(seq)  # We have the convention to exclude the depot
@@ -253,8 +258,8 @@ if __name__ == "__main__":
         "--width",
         type=int,
         nargs="+",
-        help="Sizes of beam to use for beam search (or number of samples for sampling), "
-        "0 to disable (default), -1 for infinite",
+        help="Sizes of beam to use for beam search (or number of samples for "
+        "sampling), 0 to disable (default), -1 for infinite",
     )
     parser.add_argument(
         "--decode_strategy",
@@ -289,9 +294,10 @@ if __name__ == "__main__":
 
     opts = parser.parse_args()
 
-    assert opts.o is None or (
-        len(opts.datasets) == 1 and len(opts.width) <= 1
-    ), "Cannot specify result filename with more than one dataset or more than one width"
+    assert opts.o is None or (len(opts.datasets) == 1 and len(opts.width) <= 1), (
+        "Cannot specify result filename with more than one dataset or more than "
+        "one width"
+    )
 
     widths = opts.width if opts.width is not None else [0]
 
