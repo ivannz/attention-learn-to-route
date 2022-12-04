@@ -25,12 +25,16 @@ class AbsCVRP(NamedTuple):
     # [S] current capacity (single vehicle)
     capacity: Tensor
     # [S] flag indicating if the simulation has terminated
+    tw: Tensor
+    travel_time: Tensor
+
     done: Tensor
     # [S] the cumulative route cost
     cost: Tensor
 
     # class-level constant
     MAX_CAPACITY = 1.0
+    MAX_TRAVEL_TIME = 1_000_000
 
     @classmethod
     def initialize(cls, input, visited_dtype=_unused):
@@ -49,6 +53,16 @@ class AbsCVRP(NamedTuple):
         dem = input["demand"]
         assert dem.le(cls.MAX_CAPACITY).all()  # must not exceed unit capacity
 
+        # tw = input["tw"]
+        tw = torch.randint(
+            0,
+            cls.MAX_TRAVEL_TIME,
+            size=dem.shape + (2,)
+        ).sort(-1).values
+
+        assert tw[..., 1].le(cls.MAX_TRAVEL_TIME).all()
+        assert tw[..., 0].ge(0).all()
+
         # start at the depot
         at_depot = dem[:, 0]  # full autorefill at the depot
         assert at_depot.le(0).logical_and(at_depot.isinf()).all()
@@ -60,9 +74,11 @@ class AbsCVRP(NamedTuple):
             demand=dem,
             mask=dem.le(0),
             capacity=dem.new_zeros(len(dis)).fill_(cls.MAX_CAPACITY),
+            tw=tw,
+            travel_time=tw.new_zeros(len(dis)),
             done=dis.new_zeros(len(dis), dtype=bool),
             loc=dis.new_zeros(len(dis), dtype=torch.long),
-            cost=dis.new_zeros(len(dis)),
+            cost=dis.new_zeros(len(dis)), # 
         )
 
     def update(self, selected):
@@ -70,7 +86,9 @@ class AbsCVRP(NamedTuple):
 
         # update costs with links from the current location and to endpoints
         # d_{b v_b \to w_b} for `loc` v_b and `selected` w_b
+
         cost = self.cost.add(self.distances[self.instance, self.loc, selected])
+        travel_time = self.travel_time.add(self.distances[self.instance, self.loc, selected])
 
         # we deliver to the `n`-th client as much as we can when visiting them
         picked = selected.unsqueeze(-1)
@@ -95,13 +113,18 @@ class AbsCVRP(NamedTuple):
         satisfied = demand.le(0.0)
         at_depot = selected.eq(0)
 
+        tw_satisfied = travel_time.unsqueeze(-1).ge(self.tw[..., 0])
+        tw_satisfied = tw_satisfied.logical_and(travel_time.unsqueeze(-1).le(self.tw[..., 1]))
+
+        satisfied.logical_and_(tw_satisfied)
+
         # f_{bi} = `i` forbidden at `b` if `(d_{bi} \leq 0) OR (c_b \leq 0)`
         mask = satisfied.logical_or(capacity.le(0.0).unsqueeze(-1))
 
         # if partial deliveries are NOT allowed, then forbid unserviceables
         #  f_{bi} |= (d_{b i} > c_b) AND NOT p_b
         not_partial = self.partial[self.instance].logical_not().unsqueeze(-1)
-        mask.logical_or_(demand.gt(capacity.unsqueeze(-1)).logical_and(not_partial))
+        mask.logical_or_(demand.gt(capacity.unsqueeze(-1)).logical_and_(not_partial))
 
         # finally allow the depot if not currently in it, unless all clients
         #  have been satisfied
@@ -118,6 +141,7 @@ class AbsCVRP(NamedTuple):
             mask=mask,
             loc=selected.clone(),
             capacity=capacity,
+            travel_time=travel_time,
             done=done,
             cost=cost,
         )
