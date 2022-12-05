@@ -123,13 +123,77 @@ class AbsVRPDataset(Dataset):
         CAPACITIES = {10: 20.0, 20: 30.0, 50: 40.0, 100: 50.0}
 
         self.data = []
+
+        n_depots = 1
+        n_locations = size
+        n_nodes = n_locations + n_depots
+
+        def greedy_route(T):
+            """Get a greedy route"""
+            B = T.clone()
+
+            path = [0]
+            while len(path) < len(B):
+                B[:, path[-1]] = float('inf')
+                path.append(B[path[-1], :].argmin())
+            path.append(0)
+
+            return torch.tensor(path).long()
+
         for _ in range(num_samples):
-            loc = torch.rand(1 + size, 2)  # locations random in .uniform_(0, 1)
-            # pairs = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+            loc = torch.rand(n_nodes, 2)  # locations random in .uniform_(0, 1)
+            pairs = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
 
             # node demands,  Uniform 1 - 9, scaled by capacities
-            demand = torch.randint(1, 10, size=(1 + size,)) / CAPACITIES[size]
+            demand = torch.randint(1, 10, size=(n_nodes,)) / CAPACITIES[size]
             demand[0] = -float("inf")
+
+            T = pairs
+            D = demand
+            Q = torch.ones(1) * CAPACITIES[size]
+
+            router = greedy_route
+
+            # sample time-windows
+            vehicles = dict(enumerate(Q))
+            nodes = dict(enumerate(D))
+
+            clients = torch.arange(n_depots, n_nodes)
+            depots = torch.arange(n_depots)
+
+            n_circuits = len(vehicles)
+            width = 1.0
+            linger = 1.0
+
+            # compute tentative visitation times
+            times = torch.zeros(len(nodes))
+
+            location = clients[torch.randperm(clients.shape[0])]
+            starting = torch.randperm(depots.shape[0])[:n_circuits]
+
+            for k, depot in enumerate(starting):
+                # get the clients in the partition
+                ix = torch.cat([torch.tensor([depot]), location[k::n_circuits]]).long()
+                # get a plausible route (v_j)_{j=0}^n with v_n = v_0 through
+                #  the clients in the group `ix`
+                # XXX be careful not to ACCIDENTALLY transpose the matrix!
+                route = ix[router(T[ix[:, None], ix[None, :]])]
+
+                # compute the visitation times
+                travel = T[route[:-1], route[1:]]  # XXX time from v_j to v_{j+1}, j=0..n-1
+                times[route[1:]] = torch.flatten(travel + linger).cumsum(-1)  # XXX we overwrite depot times
+
+            # compute cleaner depot times: the latest visitation time taking into
+            #  account the return time
+            index = clients[:, None]
+            times[depots] = (T[index, depots[None, :]] + times[index]).max(0).values
+
+            # generate symmetric windows around the arrival time, ignoring depots
+            widths = torch.rand(len(times)) * width
+            L, U = times - widths, times + widths
+            L[depots] = 0.0
+
+            tw = torch.stack([L, U], dim=-1)
 
             # node type tokens
             kinds = torch.empty(1 + size, dtype=int)
@@ -143,8 +207,11 @@ class AbsVRPDataset(Dataset):
                     "locations": loc,
                     "demand": demand,
                     "kinds": kinds,
+                    "tw": tw,
                 }
             )
+
+
 
         self.size = len(self.data)
 

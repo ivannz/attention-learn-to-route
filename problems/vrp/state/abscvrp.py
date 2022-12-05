@@ -53,12 +53,7 @@ class AbsCVRP(NamedTuple):
         dem = input["demand"]
         assert dem.le(cls.MAX_CAPACITY).all()  # must not exceed unit capacity
 
-        # tw = input["tw"]
-        tw = torch.randint(
-            0,
-            cls.MAX_TRAVEL_TIME,
-            size=dem.shape + (2,)
-        ).sort(-1).values
+        tw = input["tw"]
 
         assert tw[..., 1].le(cls.MAX_TRAVEL_TIME).all()
         assert tw[..., 0].ge(0).all()
