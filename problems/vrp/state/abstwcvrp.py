@@ -7,12 +7,18 @@ from torch import Tensor
 _unused = object()
 
 
-class AbsTWCVRP(NamedTuple):
+class AbsCVRP(NamedTuple):
     # B -- batch, S -- search (beamsearch)
     # [B] boolean flag, specifying if demands can be partially satisfied
     partial: Tensor
     # [B x N x N] large dense shortest path matrix used as reference
     distances: Tensor
+    # [B x N x N]
+    time_costs: Tensor
+
+    # [B x N x 2]
+    tw: Tensor
+
     # [S] index to instance correspondence S -->> B surjective
     instance: Tensor
     # [S x ...] the runtime state
@@ -24,6 +30,8 @@ class AbsTWCVRP(NamedTuple):
     loc: Tensor
     # [S] current capacity (single vehicle)
     capacity: Tensor
+    # [S]
+    travel_time: Tensor
     # [S] flag indicating if the simulation has terminated
     done: Tensor
     # [S] the cumulative route cost
@@ -31,6 +39,8 @@ class AbsTWCVRP(NamedTuple):
 
     # class-level constant
     MAX_CAPACITY = 1.0
+    MIN_TRAVEL_TIME = 0.001
+    MAX_TRAVEL_TIME = 1_000_000
 
     @classmethod
     def initialize(cls, input, visited_dtype=_unused):
@@ -49,6 +59,11 @@ class AbsTWCVRP(NamedTuple):
         dem = input["demand"]
         assert dem.le(cls.MAX_CAPACITY).all()  # must not exceed unit capacity
 
+        tw = input["tw"]
+
+        assert tw[..., 1].le(cls.MAX_TRAVEL_TIME).all()
+        assert tw[..., 0].ge(0).all()
+
         # start at the depot
         at_depot = dem[:, 0]  # full autorefill at the depot
         assert at_depot.le(0).logical_and(at_depot.isinf()).all()
@@ -56,13 +71,16 @@ class AbsTWCVRP(NamedTuple):
         return cls(
             partial=input["partial"],
             distances=dis,
+            time_costs=dis,
             instance=torch.arange(len(dis), device=dis.device),
             demand=dem,
             mask=dem.le(0),
             capacity=dem.new_zeros(len(dis)).fill_(cls.MAX_CAPACITY),
+            tw=tw,
+            travel_time=dis.new_zeros(len(dis)),
             done=dis.new_zeros(len(dis), dtype=bool),
             loc=dis.new_zeros(len(dis), dtype=torch.long),
-            cost=dis.new_zeros(len(dis)),
+            cost=dis.new_zeros(len(dis)), # 
         )
 
     def update(self, selected):
@@ -71,6 +89,16 @@ class AbsTWCVRP(NamedTuple):
         # update costs with links from the current location and to endpoints
         # d_{b v_b \to w_b} for `loc` v_b and `selected` w_b
         cost = self.cost.add(self.distances[self.instance, self.loc, selected])
+        travel_time = self.travel_time.add(self.time_costs[self.instance, self.loc, selected])
+
+        travel_time[self.loc.eq(selected)] += self.MIN_TRAVEL_TIME
+
+        tw_early = travel_time.le(self.tw[self.instance, selected, 0])
+        tw_late  = travel_time.ge(self.tw[self.instance, selected, 1])
+        tw_satisfied = tw_early.logical_not().logical_and(tw_late.logical_not())
+
+        at_depot = selected.eq(0)
+        tw_satisfied[at_depot] = True
 
         # we deliver to the `n`-th client as much as we can when visiting them
         picked = selected.unsqueeze(-1)
@@ -82,6 +110,8 @@ class AbsTWCVRP(NamedTuple):
             max=self.capacity,
         ).neg_()
 
+        delta *= tw_satisfied.int().float()
+
         # compute new capacity and demands (produce copies)
         capacity = self.capacity.add(delta)
         demand = self.demand.scatter_add(-1, picked, delta.unsqueeze(-1))
@@ -92,8 +122,12 @@ class AbsTWCVRP(NamedTuple):
         # 2) nodes with non-+ve residual demand are not to be revisited
         # 3) clients not serviceable with the current capacity cannot be visited
         # 4) FORCE return to depot if empty
-        satisfied = demand.le(0.0)
-        at_depot = selected.eq(0)
+
+        ext_tw_sat = demand.le(0.0).logical_and(torch.tensor(False))
+        rows, cols = torch.arange(len(selected)), selected
+        ext_tw_sat[rows, cols] = ext_tw_sat[rows, cols].logical_or_(tw_satisfied)
+
+        satisfied = demand.le(0.0).logical_and(ext_tw_sat)
 
         # f_{bi} = `i` forbidden at `b` if `(d_{bi} \leq 0) OR (c_b \leq 0)`
         mask = satisfied.logical_or(capacity.le(0.0).unsqueeze(-1))
@@ -101,7 +135,7 @@ class AbsTWCVRP(NamedTuple):
         # if partial deliveries are NOT allowed, then forbid unserviceables
         #  f_{bi} |= (d_{b i} > c_b) AND NOT p_b
         not_partial = self.partial[self.instance].logical_not().unsqueeze(-1)
-        mask.logical_or_(demand.gt(capacity.unsqueeze(-1)).logical_and(not_partial))
+        mask.logical_or_(demand.gt(capacity.unsqueeze(-1)).logical_and_(not_partial))
 
         # finally allow the depot if not currently in it, unless all clients
         #  have been satisfied
@@ -110,7 +144,7 @@ class AbsTWCVRP(NamedTuple):
 
         # re-raise the finish flag
         #  d_b |= (\ell_b = 0) AND (\cap_{i \neq 0} (d_{bi} \leq 0))
-        done = satisfied.all(-1).logical_and_(at_depot).logical_or_(self.done)
+        done = satisfied.all(-1).logical_and_(at_depot).logical_or_(tw_late).logical_or_(self.done)
 
         # return the updated state
         return self._replace(
@@ -120,6 +154,7 @@ class AbsTWCVRP(NamedTuple):
             capacity=capacity,
             done=done,
             cost=cost,
+            travel_time=travel_time,
         )
 
     def __getitem__(self, index):
@@ -131,6 +166,7 @@ class AbsTWCVRP(NamedTuple):
             capacity=self.capacity[index],
             done=self.done[index],
             cost=self.cost[index],
+            travel_time=self.travel_time[index],
         )
 
     @property
@@ -241,13 +277,20 @@ def beam_search(state, k, propose=None, *, commit=id, largest=True):
     commit(beam)
 
     # propose expansion for each beam, materialize them and then filter
+
+    counter = 0
     while not beam.state.done.all():
+        
         parent, action, score = propose(beam)
         if len(parent) < 1:
             break
 
         beam = beam.expand(parent, action, score).select(k, largest=largest)
         commit(beam)
+
+        counter += 1
+        if (counter > 5000):
+            assert False
 
     return beam
 
@@ -274,12 +317,93 @@ def propose(beam, *, k=3, kind):
     is_finite = scores.isfinite()
     return parent[is_finite], action[is_finite], scores[is_finite]
 
+def gen_tw(num_samples, n_locations, n_depots):
+    CAPACITIES = {10: 20.0, 20: 30.0, 50: 40.0, 100: 50.0}
+
+    data = []
+
+    n_nodes = n_locations + n_depots
+
+    def greedy_route(T):
+        """Get a greedy route"""
+        B = T.clone()
+
+        path = [0]
+        while len(path) < len(B):
+            B[:, path[-1]] = float('inf')
+            path.append(B[path[-1], :].argmin())
+        path.append(0)
+
+        return torch.tensor(path).long()
+
+    for _ in range(num_samples):
+        loc = torch.rand(n_nodes, 2)  # locations random in .uniform_(0, 1)
+        pairs = torch.norm(loc.unsqueeze(0) - loc.unsqueeze(1), p=2, dim=-1)
+
+        # node demands,  Uniform 1 - 9, scaled by capacities
+        demand = torch.randint(1, 10, size=(n_nodes,)) / CAPACITIES[n_locations]
+        demand[0] = -float("inf")
+
+        T = pairs
+        D = demand
+        Q = torch.ones(1) * CAPACITIES[n_locations]
+
+        router = greedy_route
+
+        # sample time-windows
+        vehicles = dict(enumerate(Q))
+        nodes = dict(enumerate(D))
+
+        clients = torch.arange(n_depots, n_nodes)
+        depots = torch.arange(n_depots)
+
+        n_circuits = len(vehicles)
+        width = 1.0
+        linger = 1.0
+
+        # compute tentative visitation times
+        times = torch.zeros(len(nodes))
+
+        location = clients[torch.randperm(clients.shape[0])]
+        starting = torch.randperm(depots.shape[0])[:n_circuits]
+
+        for k, depot in enumerate(starting):
+            # get the clients in the partition
+            ix = torch.cat([torch.tensor([depot]), location[k::n_circuits]]).long()
+            # get a plausible route (v_j)_{j=0}^n with v_n = v_0 through
+            #  the clients in the group `ix`
+            # XXX be careful not to ACCIDENTALLY transpose the matrix!
+            route = ix[router(T[ix[:, None], ix[None, :]])]
+
+            # compute the visitation times
+            travel = T[route[:-1], route[1:]]  # XXX time from v_j to v_{j+1}, j=0..n-1
+            times[route[1:]] = torch.flatten(travel + linger).cumsum(-1)  # XXX we overwrite depot times
+
+        # compute cleaner depot times: the latest visitation time taking into
+        #  account the return time
+        index = clients[:, None]
+        times[depots] = (T[index, depots[None, :]] + times[index]).max(0).values
+
+        # generate symmetric windows around the arrival time, ignoring depots
+        widths = torch.rand(len(times)) * width
+        L, U = times - widths, times + widths
+        L[depots] = 0.0
+
+        tw = torch.stack([L, U], dim=-1)
+
+        # node type tokens
+        kinds = torch.empty(1 + n_locations, dtype=int)
+        kinds[0] = 0
+        kinds[1:] = 1
+
+        data.append(tw)
+    return torch.stack(data, dim=0)
 
 if __name__ == "__main__":
     from functools import partial
 
     # distances
-    n_batch_size, n_loc = 64, 50
+    n_batch_size, n_loc = 4, 50
     e = torch.rand(n_batch_size, 1 + n_loc, 1 + n_loc).log_().neg_()
     e.diagonal(dim1=-2, dim2=-1)[:] = 0
     for j in range(e.shape[1]):
@@ -295,14 +419,16 @@ if __name__ == "__main__":
 
     # e[:] = e[[0]]
     # x[:] = x[[0]]
-    input = dict(distances=e, demand=x, partial=p)
+    tw = gen_tw(n_batch_size, n_loc, 1) / 30
 
-    state = AbsTWCVRP.initialize(input)
+    input = dict(distances=e, demand=x, partial=p, tw=tw)
+
+    state = AbsCVRP.initialize(input)
     history = []
     out = beam_search(
         state,
-        k=9,
-        propose=partial(propose, k=9, kind="greedy"),
+        k=3,
+        propose=partial(propose, k=3, kind="greedy"),
         commit=history.append,
     )
 
@@ -323,7 +449,7 @@ if __name__ == "__main__":
 
     actions = torch.stack(actions[::-1], dim=-1)
 
-    self = AbsTWCVRP.initialize(input)
+    self = AbsCVRP.initialize(input)
     actions = []
     while not self.done.all():
         group, allow = self.mask.logical_not().nonzero(as_tuple=True)
