@@ -288,10 +288,6 @@ def beam_search(state, k, propose=None, *, commit=id, largest=True):
         beam = beam.expand(parent, action, score).select(k, largest=largest)
         commit(beam)
 
-        counter += 1
-        if (counter > 5000):
-            assert False
-
     return beam
 
 
@@ -403,7 +399,7 @@ if __name__ == "__main__":
     from functools import partial
 
     # distances
-    n_batch_size, n_loc = 4, 50
+    n_batch_size, n_loc = 64, 50
     e = torch.rand(n_batch_size, 1 + n_loc, 1 + n_loc).log_().neg_()
     e.diagonal(dim1=-2, dim2=-1)[:] = 0
     for j in range(e.shape[1]):
@@ -427,8 +423,8 @@ if __name__ == "__main__":
     history = []
     out = beam_search(
         state,
-        k=3,
-        propose=partial(propose, k=3, kind="greedy"),
+        k=8,
+        propose=partial(propose, k=8, kind="greedy"),
         commit=history.append,
     )
 
