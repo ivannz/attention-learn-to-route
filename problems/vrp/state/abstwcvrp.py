@@ -7,7 +7,7 @@ from torch import Tensor
 _unused = object()
 
 
-class AbsCVRP(NamedTuple):
+class AbsTWCVRP(NamedTuple):
     # B -- batch, S -- search (beamsearch)
     # [B] boolean flag, specifying if demands can be partially satisfied
     partial: Tensor
@@ -423,7 +423,7 @@ if __name__ == "__main__":
 
     input = dict(distances=e, demand=x, partial=p, tw=tw)
 
-    state = AbsCVRP.initialize(input)
+    state = AbsTWCVRP.initialize(input)
     history = []
     out = beam_search(
         state,
@@ -449,7 +449,7 @@ if __name__ == "__main__":
 
     actions = torch.stack(actions[::-1], dim=-1)
 
-    self = AbsCVRP.initialize(input)
+    self = AbsTWCVRP.initialize(input)
     actions = []
     while not self.done.all():
         group, allow = self.mask.logical_not().nonzero(as_tuple=True)
