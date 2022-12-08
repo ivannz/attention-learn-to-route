@@ -13,12 +13,10 @@ class AbsTWCVRP(NamedTuple):
     partial: Tensor
     # [B x N x N] large dense shortest path matrix used as reference
     distances: Tensor
-    # [B x N x N]
+    # [B x N x N] time costs matrix
     time_costs: Tensor
-
-    # [B x N x 2]
+    # [B x N x 2] lowwer\upper bound time windows. L = [:, :, 0], U = [:, :, 1]
     tw: Tensor
-
     # [S] index to instance correspondence S -->> B surjective
     instance: Tensor
     # [S x ...] the runtime state
@@ -30,7 +28,7 @@ class AbsTWCVRP(NamedTuple):
     loc: Tensor
     # [S] current capacity (single vehicle)
     capacity: Tensor
-    # [S]
+    # [S] cumulative time spent on traveling
     travel_time: Tensor
     # [S] flag indicating if the simulation has terminated
     done: Tensor
@@ -39,7 +37,8 @@ class AbsTWCVRP(NamedTuple):
 
     # class-level constant
     MAX_CAPACITY = 1.0
-    MIN_TRAVEL_TIME = 0.001
+    # minimal time interval for waiting
+    MIN_TRAVEL_TIME = 0.001 
     MAX_TRAVEL_TIME = 1_000_000
 
     @classmethod
@@ -56,13 +55,18 @@ class AbsTWCVRP(NamedTuple):
         else:
             raise TypeError(f"Bad CVRP problem instance `{list(input.keys())}`.")
 
+        if "time_costs" in input:
+            tcost = input["time_costs"]
+        else:
+            tcost = dis
+
         dem = input["demand"]
         assert dem.le(cls.MAX_CAPACITY).all()  # must not exceed unit capacity
 
         tw = input["tw"]
 
-        assert tw[..., 1].le(cls.MAX_TRAVEL_TIME).all()
         assert tw[..., 0].ge(0).all()
+        assert tw[..., 1].le(cls.MAX_TRAVEL_TIME).all() 
 
         # start at the depot
         at_depot = dem[:, 0]  # full autorefill at the depot
@@ -71,7 +75,7 @@ class AbsTWCVRP(NamedTuple):
         return cls(
             partial=input["partial"],
             distances=dis,
-            time_costs=dis,
+            time_costs=tcost,
             instance=torch.arange(len(dis), device=dis.device),
             demand=dem,
             mask=dem.le(0),
@@ -89,15 +93,18 @@ class AbsTWCVRP(NamedTuple):
         # update costs with links from the current location and to endpoints
         # d_{b v_b \to w_b} for `loc` v_b and `selected` w_b
         cost = self.cost.add(self.distances[self.instance, self.loc, selected])
+        # update travel time from the current location and to endpoints
         travel_time = self.travel_time.add(self.time_costs[self.instance, self.loc, selected])
-
+        # if the current location equals to endpoints so wait fot minimal time interval (MIN_TRAVEL_TIME)
         travel_time[self.loc.eq(selected)] += self.MIN_TRAVEL_TIME
 
+        # get binary wasks if vahicle comes to endpoint too early\too late\in time(satisfied)
         tw_early = travel_time.le(self.tw[self.instance, selected, 0])
         tw_late  = travel_time.ge(self.tw[self.instance, selected, 1])
         tw_satisfied = tw_early.logical_not().logical_and(tw_late.logical_not())
 
         at_depot = selected.eq(0)
+        # depot has tw[0] = 0, tw[1] = MAX_TRAVEL_TIME, but for sure set tw as satisfied
         tw_satisfied[at_depot] = True
 
         # we deliver to the `n`-th client as much as we can when visiting them
@@ -110,6 +117,7 @@ class AbsTWCVRP(NamedTuple):
             max=self.capacity,
         ).neg_()
 
+        # changes only in vehicles that delivered in time
         delta *= tw_satisfied.int().float()
 
         # compute new capacity and demands (produce copies)
@@ -122,6 +130,9 @@ class AbsTWCVRP(NamedTuple):
         # 2) nodes with non-+ve residual demand are not to be revisited
         # 3) clients not serviceable with the current capacity cannot be visited
         # 4) FORCE return to depot if empty
+        # 5) if delivery is too early - the option is to wait in destination point until TW has come
+        # 6) delivery is successful if satisfied capacity for partial\not partial delivery AND TW if satisfied.
+        # if delivery is late then point is set as forbidden
 
         ext_tw_sat = demand.le(0.0).logical_and(torch.tensor(False))
         rows, cols = torch.arange(len(selected)), selected
@@ -144,6 +155,7 @@ class AbsTWCVRP(NamedTuple):
 
         # re-raise the finish flag
         #  d_b |= (\ell_b = 0) AND (\cap_{i \neq 0} (d_{bi} \leq 0))
+        #  done |= late || (not early & not late and satisfied_capacity)
         done = satisfied.all(-1).logical_and_(at_depot).logical_or_(tw_late).logical_or_(self.done)
 
         # return the updated state
@@ -313,7 +325,8 @@ def propose(beam, *, k=3, kind):
     is_finite = scores.isfinite()
     return parent[is_finite], action[is_finite], scores[is_finite]
 
-def gen_tw(num_samples, n_locations, n_depots):
+def generate_tw(num_samples, n_locations, n_depots):
+    # need using T 
     CAPACITIES = {10: 20.0, 20: 30.0, 50: 40.0, 100: 50.0}
 
     data = []
@@ -415,16 +428,16 @@ if __name__ == "__main__":
 
     # e[:] = e[[0]]
     # x[:] = x[[0]]
-    tw = gen_tw(n_batch_size, n_loc, 1) / 30
+    tw = generate_tw(n_batch_size, n_loc, 1) / 30
 
-    input = dict(distances=e, demand=x, partial=p, tw=tw)
+    input = dict(distances=e, time_costs=e, demand=x, partial=p, tw=tw)
 
     state = AbsTWCVRP.initialize(input)
     history = []
     out = beam_search(
         state,
-        k=8,
-        propose=partial(propose, k=8, kind="greedy"),
+        k=9,
+        propose=partial(propose, k=9, kind="greedy"),
         commit=history.append,
     )
 
